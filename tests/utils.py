@@ -1,9 +1,9 @@
 from datetime import datetime
+from typing import List
 
 import typer
-from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
-from openai.types.chat.chat_completion_chunk import Choice as StreamChoice
-from openai.types.chat.chat_completion_chunk import ChoiceDelta
+from openai.types.chat import ChatCompletionChunk, ChatCompletionChunkMessage
+from openai.types.chat.chat_completion_chunk import Choice, ChoiceDelta
 from typer.testing import CliRunner
 
 from sgpt import main
@@ -14,23 +14,46 @@ app = typer.Typer()
 app.command()(main)
 
 
-def mock_comp(tokens_string):
-    return [
-        ChatCompletionChunk(
-            id="foo",
+def mock_comp(tokens_string: List[str]) -> List[ChatCompletionChunk]:
+    """Mock the completion response for testing."""
+    chunks = []
+    for token in tokens_string:
+        chunk = ChatCompletionChunk(
+            id="chatcmpl-123",
             model=cfg.get("DEFAULT_MODEL"),
             object="chat.completion.chunk",
+            created=int(datetime.now().timestamp()),
             choices=[
-                StreamChoice(
+                Choice(
                     index=0,
                     finish_reason=None,
-                    delta=ChoiceDelta(content=token, role="assistant"),
-                ),
+                    delta=ChoiceDelta(
+                        content=token,
+                        role="assistant",
+                    ),
+                )
             ],
-            created=int(datetime.now().timestamp()),
         )
-        for token in tokens_string
-    ]
+        chunks.append(chunk)
+    
+    # Add a final chunk with finish_reason="stop"
+    if chunks:
+        final_chunk = ChatCompletionChunk(
+            id="chatcmpl-123",
+            model=cfg.get("DEFAULT_MODEL"),
+            object="chat.completion.chunk",
+            created=int(datetime.now().timestamp()),
+            choices=[
+                Choice(
+                    index=0,
+                    finish_reason="stop",
+                    delta=ChoiceDelta(),
+                )
+            ],
+        )
+        chunks.append(final_chunk)
+    
+    return chunks
 
 
 def cmd_args(prompt="", **kwargs):

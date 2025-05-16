@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Callable, Dict, Generator, List, Optional
+from typing import Any, Callable, Dict, Generator, List, Optional, Union, cast
 
 from ..cache import Cache
 from ..config import cfg
@@ -8,26 +8,57 @@ from ..function import get_function
 from ..printer import MarkdownPrinter, Printer, TextPrinter
 from ..role import DefaultRoles, SystemRole
 
-completion: Callable[..., Any] = lambda *args, **kwargs: Generator[Any, None, None]
+# Type aliases
+CompletionGenerator = Generator[Any, None, None]
+CompletionFunc = Callable[..., CompletionGenerator]
 
+# Initialize completion function placeholder
+completion: CompletionFunc = lambda *args, **kwargs: (yield from [])
+
+# Get configuration values
 base_url = cfg.get("API_BASE_URL")
 use_litellm = cfg.get("USE_LITELLM") == "true"
-additional_kwargs = {
+use_ollama = cfg.get("USE_OLLAMA") == "true"
+
+# Common request parameters
+request_params = {
     "timeout": int(cfg.get("REQUEST_TIMEOUT")),
     "api_key": cfg.get("OPENAI_API_KEY"),
-    "base_url": None if base_url == "default" else base_url,
 }
 
-if use_litellm:
+# Initialize the appropriate client
+if use_ollama:
+    # For Ollama, we'll use the OpenAI client but point it to the Ollama server
+    ollama_base_url = cfg.get("OLLAMA_BASE_URL")
+    request_params.update({
+        "base_url": ollama_base_url,
+        "api_key": "ollama",  # Ollama doesn't require an API key
+    })
+    from openai import OpenAI
+    
+    client = OpenAI(**request_params)
+    completion = client.chat.completions.create
+    additional_kwargs = {
+        "model": cfg.get("OLLAMA_MODEL"),
+        "temperature": float(cfg.get("OLLAMA_TEMPERATURE")),
+        "top_p": float(cfg.get("OLLAMA_TOP_P")),
+    }
+elif use_litellm:
     import litellm  # type: ignore
 
     completion = litellm.completion
     litellm.suppress_debug_info = True
-    additional_kwargs.pop("api_key")
+    # LiteLLM doesn't use the same parameter names
+    additional_kwargs = {k: v for k, v in request_params.items() if k != "api_key"}
 else:
+    # Standard OpenAI client
+    if base_url != "default":
+        request_params["base_url"] = base_url
+    
     from openai import OpenAI
-
-    client = OpenAI(**additional_kwargs)  # type: ignore
+    from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageToolCall
+    
+    client = OpenAI(**request_params)
     completion = client.chat.completions.create
     additional_kwargs = {}
 
@@ -95,52 +126,80 @@ class Handler:
         is_shell_role = self.role.name == DefaultRoles.SHELL.value
         is_code_role = self.role.name == DefaultRoles.CODE.value
         is_dsc_shell_role = self.role.name == DefaultRoles.DESCRIBE_SHELL.value
-        if is_shell_role or is_code_role or is_dsc_shell_role:
+        use_ollama = cfg.get("USE_OLLAMA") == "true"
+        
+        # Disable functions for certain roles or when using Ollama
+        if is_shell_role or is_code_role or is_dsc_shell_role or use_ollama:
             functions = None
 
-        if functions:
-            additional_kwargs["tool_choice"] = "auto"
-            additional_kwargs["tools"] = functions
-            additional_kwargs["parallel_tool_calls"] = False
-
-        response = completion(
-            model=model,
-            temperature=temperature,
-            top_p=top_p,
-            messages=messages,
-            stream=True,
+        # Prepare the request parameters
+        request_params = {
+            "model": model if not use_ollama else cfg.get("OLLAMA_MODEL"),
+            "messages": messages,
+            "stream": True,
             **additional_kwargs,
-        )
+        }
+        
+        # Only add these parameters if they're not already in additional_kwargs
+        if not use_ollama:
+            request_params.update({
+                "temperature": temperature,
+                "top_p": top_p,
+            })
+
+        # Handle tools/functions if provided (not supported by Ollama)
+        if functions and not use_ollama:
+            request_params["tools"] = functions
+            request_params["tool_choice"] = "auto"
+
+        # Make the API call
+        try:
+            response = completion(**request_params)
+        except Exception as e:
+            raise RuntimeError(f"Failed to get completion from the API: {str(e)}")
 
         try:
+            name = ""
+            arguments = ""
+            
             for chunk in response:
-                delta = chunk.choices[0].delta
-
-                # LiteLLM uses dict instead of Pydantic object like OpenAI does.
-                tool_calls = (
-                    delta.get("tool_calls") if use_litellm else delta.tool_calls
-                )
-                if tool_calls:
-                    for tool_call in tool_calls:
-                        if tool_call.function.name:
-                            name = tool_call.function.name
-                        if tool_call.function.arguments:
-                            arguments += tool_call.function.arguments
-                if chunk.choices[0].finish_reason == "tool_calls":
-                    yield from self.handle_function_call(messages, name, arguments)
-                    yield from self.get_completion(
-                        model=model,
-                        temperature=temperature,
-                        top_p=top_p,
-                        messages=messages,
-                        functions=functions,
-                        caching=False,
-                    )
+                if not hasattr(chunk, 'choices') or not chunk.choices:
+                    continue
+                    
+                choice = chunk.choices[0]
+                delta = choice.delta
+                
+                # Handle tool calls if present
+                if hasattr(delta, 'tool_calls') and delta.tool_calls:
+                    for tool_call in delta.tool_calls:
+                        if hasattr(tool_call, 'function') and tool_call.function:
+                            if hasattr(tool_call.function, 'name') and tool_call.function.name:
+                                name = tool_call.function.name
+                            if hasattr(tool_call.function, 'arguments') and tool_call.function.arguments:
+                                arguments += tool_call.function.arguments
+                
+                # Handle finish reason
+                if hasattr(choice, 'finish_reason') and choice.finish_reason == "tool_calls":
+                    if name and arguments:
+                        yield from self.handle_function_call(messages, name, arguments)
+                        # Continue with a new completion to handle the function response
+                        yield from self.get_completion(
+                            model=model,
+                            temperature=temperature,
+                            top_p=top_p,
+                            messages=messages,
+                            functions=functions,
+                            caching=False,
+                        )
                     return
-
-                yield delta.content or ""
+                
+                # Yield the content if available
+                if hasattr(delta, 'content') and delta.content is not None:
+                    yield delta.content
+                    
         except KeyboardInterrupt:
-            response.close()
+            if hasattr(response, 'close'):
+                response.close()
 
     def handle(
         self,

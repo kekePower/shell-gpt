@@ -9,10 +9,96 @@ pip install shell-gpt
 ```
 By default, ShellGPT uses OpenAI's API and GPT-4 model. You'll need an API key, you can generate one [here](https://beta.openai.com/account/api-keys). You will be prompted for your key which will then be stored in `~/.config/shell_gpt/.sgptrc`. OpenAI API is not free of charge, please refer to the [OpenAI pricing](https://openai.com/pricing) for more information.
 
-> [!TIP]
-> Alternatively, you can use locally hosted open source models which are available for free. To use local models, you will need to run your own LLM backend server such as [Ollama](https://github.com/ollama/ollama). To set up ShellGPT with Ollama, please follow this comprehensive [guide](https://github.com/TheR1D/shell_gpt/wiki/Ollama).
->
-> **❗️Note that ShellGPT is not optimized for local models and may not work as expected.**
+## Using Ollama for Local Models
+
+You can use Shell-GPT with local models via [Ollama](https://github.com/ollama/ollama), which allows you to run various open-source models locally.
+
+### Setup Instructions
+
+1. **Install Ollama**
+   Follow the installation instructions for your platform: [Ollama Installation](https://github.com/ollama/ollama)
+
+2. **Run the Ollama server**
+   ```bash
+   ollama serve
+   ```
+   This will start the Ollama server at `http://localhost:11434` by default.
+
+3. **Pull a model** (if not already available)
+   ```bash
+   ollama pull llama3  # Example model, you can use any model from the library
+   ```
+
+4. **Configure Shell-GPT to use Ollama**
+   You can either set environment variables or update your `~/.config/shell_gpt/.sgptrc` file:
+
+   ```bash
+   # Enable Ollama
+   export USE_OLLAMA=true
+   
+   # Optional: Configure Ollama settings (these are the defaults)
+   export OLLAMA_BASE_URL=http://localhost:11434
+   export OLLAMA_MODEL=llama3
+   export OLLAMA_TEMPERATURE=0.7
+   export OLLAMA_TOP_P=0.9
+   ```
+
+   Or add these to your `~/.config/shell_gpt/.sgptrc`:
+   ```
+   USE_OLLAMA=true
+   OLLAMA_BASE_URL=http://localhost:11434
+   OLLAMA_MODEL=llama3
+   OLLAMA_TEMPERATURE=0.7
+   OLLAMA_TOP_P=0.9
+   ```
+
+### Usage with Ollama
+
+Once configured, you can use Shell-GPT as usual, and it will use your local Ollama server:
+
+```bash
+sgpt "Tell me a joke"
+```
+
+### Notes
+
+- Ollama integration currently doesn't support function calling
+- The first request might be slow as the model loads
+- Response quality depends on the model you're using with Ollama
+- For best results, use models that are specifically fine-tuned for instruction following
+
+### Available Models
+
+You can browse available models on the [Ollama Library](https://ollama.ai/library) or list them using:
+
+```bash
+ollama list
+```
+
+Some recommended models:
+- `llama3` - Good balance of speed and quality
+- `mistral` - Strong performance for its size
+- `codellama` - Specialized for code generation
+- `mixtral` - High-quality responses (requires more resources)
+
+### Advanced Configuration
+
+You can adjust the following parameters in your configuration:
+
+- `OLLAMA_MODEL`: The model to use (default: `llama3`)
+- `OLLAMA_BASE_URL`: URL of your Ollama server (default: `http://localhost:11434`)
+- `OLLAMA_TEMPERATURE`: Controls randomness (0.0 to 1.0, default: 0.7)
+- `OLLAMA_TOP_P`: Controls diversity (0.0 to 1.0, default: 0.9)
+
+Example of using a different model with custom parameters:
+
+```bash
+export OLLAMA_MODEL=mixtral
+export OLLAMA_TEMPERATURE=0.5
+export OLLAMA_TOP_P=0.8
+
+sgpt "Explain quantum computing in simple terms"
+```
 
 ## Usage
 **ShellGPT** is designed to quickly analyse and retrieve information. It's useful for straightforward requests ranging from technical configurations to general knowledge.

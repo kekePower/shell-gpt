@@ -34,9 +34,15 @@ DEFAULT_CONFIG = {
     "API_BASE_URL": os.getenv("API_BASE_URL", "default"),
     "PRETTIFY_MARKDOWN": os.getenv("PRETTIFY_MARKDOWN", "true"),
     "USE_LITELLM": os.getenv("USE_LITELLM", "false"),
-    "SHELL_INTERACTION": os.getenv("SHELL_INTERACTION ", "true"),
+    "SHELL_INTERACTION": os.getenv("SHELL_INTERACTION", "true"),
     "OS_NAME": os.getenv("OS_NAME", "auto"),
     "SHELL_NAME": os.getenv("SHELL_NAME", "auto"),
+    # Ollama configuration
+    "USE_OLLAMA": os.getenv("USE_OLLAMA", "false"),
+    "OLLAMA_BASE_URL": os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+    "OLLAMA_MODEL": os.getenv("OLLAMA_MODEL", "llama3"),
+    "OLLAMA_TEMPERATURE": os.getenv("OLLAMA_TEMPERATURE", "0.7"),
+    "OLLAMA_TOP_P": os.getenv("OLLAMA_TOP_P", "0.9"),
     # New features might add their own config variables here.
 }
 
